@@ -31,6 +31,13 @@ pool.on('error', (err) => {
 app.use(express.json())
 app.use(cors())
 
+app.get('/', (req, res) => {
+  res.json({ 
+    message: 'Student Scheduling API',
+    version: '1.0.0'
+  })
+})
+
 // Get all departments
 app.get('/api/v1/departments', async (req, res) => {
   try {
