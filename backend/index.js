@@ -6,6 +6,17 @@ require('dotenv').config()
 const app = express()
 const port = process.env.PORT || 3000
 
+// Add security headers middleware
+app.use((req, res, next) => {
+    // Set X-Content-Type-Options header
+    res.setHeader('X-Content-Type-Options', 'nosniff')
+    
+    // Optional: Remove X-Powered-By header for additional security
+    res.removeHeader('X-Powered-By')
+    
+    next()
+})
+
 // PostgreSQL connection
 const pool = new Pool({
   host: process.env.DB_HOST,
@@ -29,7 +40,25 @@ pool.on('error', (err) => {
 })
 
 app.use(express.json())
-app.use(cors())
+
+const allowedOrigins = [
+  'http://localhost:5173',
+];
+
+app.use(cors({
+  origin: function(origin, callback) {
+    // Allow requests with no origin (like Postman, curl)
+    if (!origin) return callback(null, true);
+    
+    if (allowedOrigins.indexOf(origin) !== -1) {
+      callback(null, true);
+    } else {
+      callback(new Error('Not allowed by CORS'));
+    }
+  },
+  credentials: true,  // If you need to send cookies/auth
+  optionsSuccessStatus: 200
+}));
 
 app.get('/', (req, res) => {
   res.json({ 
