@@ -1,19 +1,33 @@
 const express = require('express')
 const cors = require('cors')
+const cookieParser = require('cookie-parser')
 const { Pool } = require('pg')
 require('dotenv').config()
 
 const app = express()
 const port = process.env.PORT || 3000
 
-// Add security headers middleware
+// ============ CORS CONFIGURATION - MUST BE FIRST ============
+// Custom CORS middleware
 app.use((req, res, next) => {
+  // Set CORS headers
+  res.header('Access-Control-Allow-Origin', 'http://localhost:5173');
+  res.header('Access-Control-Allow-Credentials', 'true');
+  res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS, PATCH');
+  res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, Cookie, X-Requested-With, Accept');
+  res.header('Access-Control-Expose-Headers', 'Set-Cookie');
+  
+  // Handle preflight requests immediately
+  if (req.method === 'OPTIONS') {
+    return res.sendStatus(200);
+  }
+  next();
+});
 
+// Security headers middleware
+app.use((req, res, next) => {
     res.setHeader('X-Content-Type-Options', 'nosniff')
-    
-
     res.removeHeader('X-Powered-By')
-    
     next()
 })
 
@@ -39,33 +53,25 @@ pool.on('error', (err) => {
   console.error('Unexpected database error:', err)
 })
 
+// Body parsing middleware
 app.use(express.json())
+app.use(cookieParser())
 
-const allowedOrigins = [
-  'http://localhost:5173',
-];
+// ============ PUBLIC ROUTES (No authentication required) ============
+const authRoutes = require('./routes/auth');
+app.use('/', authRoutes);
 
-app.use(cors({
-  origin: function(origin, callback) {
-    // Allow requests with no origin (like Postman, curl)
-    if (!origin) return callback(null, true);
-    
-    if (allowedOrigins.indexOf(origin) !== -1) {
-      callback(null, true);
-    } else {
-      callback(new Error('Not allowed by CORS'));
-    }
-  },
-  credentials: true,  // If you need to send cookies/auth
-  optionsSuccessStatus: 200
-}));
-
+// Public health check
 app.get('/', (req, res) => {
   res.json({ 
     message: 'Student Scheduling API',
     version: '1.0.0'
   })
 })
+
+// ============ PROTECTED ROUTES (Authentication required) ============
+const { authenticate } = require('./middleware/auth');
+app.use('/api/v1', authenticate);
 
 // Get all departments
 app.get('/api/v1/departments', async (req, res) => {
