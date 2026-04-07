@@ -16,9 +16,11 @@ const pool = new Pool({
 // Cookie configuration
 const cookieOptions = {
   httpOnly: true,
-  secure: process.env.NODE_ENV === 'production',
-  sameSite: 'lax',
+  secure: process.env.NODE_ENV === 'production',  
+  sameSite: process.env.NODE_ENV === 'production' ? 'strict' : 'lax',  
   path: '/',
+  domain: process.env.COOKIE_DOMAIN || undefined,  
+  maxAge: SESSION_DURATION
 };
 
 // Session timeout: 15 minutes
