@@ -10,6 +10,7 @@ import {
 import type { Route } from "./+types/root";
 import "./app.css";
 import Navbar from "../app/components/navbar";
+import { AuthProvider } from "./contexts/AuthContext"; // ADD THIS
 
 export const links: Route.LinksFunction = () => [
   { rel: "preconnect", href: "https://fonts.googleapis.com" },
@@ -44,12 +45,14 @@ export function Layout({ children }: { children: React.ReactNode }) {
 
 export default function App() {
   return (
-    <div className="min-h-screen bg-gray-50">
-      <Navbar />
-      <main className="pt-20 min-h-screen">
-        <Outlet />
-      </main>
-    </div>
+    <AuthProvider> {/* ADD THIS WRAPPER */}
+      <div className="min-h-screen bg-gray-50">
+        <Navbar />
+        <main className="pt-20 min-h-screen">
+          <Outlet />
+        </main>
+      </div>
+    </AuthProvider>
   );
 }
 
