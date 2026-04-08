@@ -2,8 +2,8 @@ const { verifyAccessToken } = require('../utils/tokens');
 
 const authenticate = async (req, res, next) => {
   try {
-    // Get token from cookie instead of Authorization header
-    const token = req.cookies.accessToken;
+    // Get token from cookie - changed from 'accessToken' to 'sessionToken'
+    const token = req.cookies.sessionToken;
     
     if (!token) {
       return res.status(401).json({ error: 'No token provided' });

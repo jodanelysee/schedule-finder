@@ -13,6 +13,9 @@ const pool = new Pool({
   password: process.env.DB_PASSWORD,
 });
 
+// Session timeout: 15 minutes
+const SESSION_DURATION = 15 * 60 * 1000; // 15 minutes
+
 // Cookie configuration
 const cookieOptions = {
   httpOnly: true,
@@ -22,9 +25,6 @@ const cookieOptions = {
   domain: process.env.COOKIE_DOMAIN || undefined,  
   maxAge: SESSION_DURATION
 };
-
-// Session timeout: 15 minutes
-const SESSION_DURATION = 15 * 60 * 1000; // 15 minutes
 
 // Login endpoint - sets session cookie
 router.post('/api/v1/auth/login', async (req, res) => {
