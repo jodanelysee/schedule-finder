@@ -8,19 +8,18 @@ const app = express()
 const port = process.env.PORT || 3000
 
 // ============ CORS CONFIGURATION - MUST BE FIRST ============
-// Custom CORS middleware
 app.use((req, res, next) => {
-  // Set CORS headers
   res.header('Access-Control-Allow-Origin', 'http://localhost:5173');
   res.header('Access-Control-Allow-Credentials', 'true');
   res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS, PATCH');
   res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, Cookie, X-Requested-With, Accept');
   res.header('Access-Control-Expose-Headers', 'Set-Cookie');
+  res.header('Access-Control-Max-Age', '86400');
   
-  // Handle preflight requests immediately
   if (req.method === 'OPTIONS') {
     return res.sendStatus(200);
   }
+  
   next();
 });
 
@@ -57,6 +56,20 @@ pool.on('error', (err) => {
 app.use(express.json())
 app.use(cookieParser())
 
+// Debug endpoint to check session status
+app.get('/debug-session', (req, res) => {
+  console.log('=== DEBUG SESSION ===');
+  console.log('All cookies:', req.cookies);
+  console.log('Session token present:', !!req.cookies.sessionToken);
+  
+  res.json({
+    hasSessionToken: !!req.cookies.sessionToken,
+    tokenPreview: req.cookies.sessionToken ? req.cookies.sessionToken.substring(0, 50) + '...' : null,
+    allCookies: Object.keys(req.cookies),
+    cookieHeader: req.headers.cookie || 'none'
+  });
+});
+
 // ============ PUBLIC ROUTES (No authentication required) ============
 const authRoutes = require('./routes/auth');
 app.use('/', authRoutes);
@@ -69,8 +82,20 @@ app.get('/', (req, res) => {
   })
 })
 
+// ============ FILE ROUTES - Register BEFORE global auth ============
+const fileRoutes = require('./routes/files');
+app.use('/api/v1/files', fileRoutes);  // Mount file routes here
+
 // ============ PROTECTED ROUTES (Authentication required) ============
 const { authenticate } = require('./middleware/auth');
+const { 
+  validateCourseSearch, 
+  validateCourseId,
+  validateStudentSearch,
+  validateStudentId 
+} = require('./middleware/validation');
+
+// This applies to all other /api/v1 routes
 app.use('/api/v1', authenticate);
 
 // Get all departments
@@ -105,8 +130,8 @@ app.get('/api/v1/programs', async (req, res) => {
 
 // COURSE ROUTES 
 
-// Get all courses with filtering
-app.get('/api/v1/courses', async (req, res) => {
+// Get all courses with filtering - WITH VALIDATION
+app.get('/api/v1/courses', validateCourseSearch, async (req, res) => {
   try {
     const { 
       search, department, professor, status, term, 
@@ -233,8 +258,8 @@ app.get('/api/v1/courses', async (req, res) => {
   }
 })
 
-// Get single course with full details
-app.get('/api/v1/courses/:id', async (req, res) => {
+// Get single course with full details - WITH VALIDATION
+app.get('/api/v1/courses/:id', validateCourseId, async (req, res) => {
   try {
     const { id } = req.params
 
@@ -283,7 +308,7 @@ app.get('/api/v1/courses/:id', async (req, res) => {
 })
 
 // Get course roster
-app.get('/api/v1/courses/:id/students', async (req, res) => {
+app.get('/api/v1/courses/:id/students', validateCourseId, async (req, res) => {
   try {
     const { id } = req.params
     const { athlete, honors, program } = req.query
@@ -326,7 +351,7 @@ app.get('/api/v1/courses/:id/students', async (req, res) => {
 })
 
 // Get combined schedule for all students in a course
-app.get('/api/v1/courses/:id/schedule', async (req, res) => {
+app.get('/api/v1/courses/:id/schedule', validateCourseId, async (req, res) => {
   try {
     const { id } = req.params
 
@@ -397,8 +422,8 @@ app.get('/api/v1/courses/:id/schedule', async (req, res) => {
 
 // STUDENT ROUTES
 
-// Get all students with filtering
-app.get('/api/v1/students', async (req, res) => {
+// Get all students with filtering - WITH VALIDATION
+app.get('/api/v1/students', validateStudentSearch, async (req, res) => {
   try {
     const {
       search, athlete, honors, first_gen, program, graduating, level,
@@ -471,8 +496,8 @@ app.get('/api/v1/students', async (req, res) => {
   }
 })
 
-// Get single student with full details
-app.get('/api/v1/students/:id', async (req, res) => {
+// Get single student with full details - WITH VALIDATION
+app.get('/api/v1/students/:id', validateStudentId, async (req, res) => {
   try {
     const { id } = req.params
 
@@ -507,8 +532,8 @@ app.get('/api/v1/students/:id', async (req, res) => {
   }
 })
 
-// Get student's enrolled courses
-app.get('/api/v1/students/:id/courses', async (req, res) => {
+// Get student's enrolled courses - WITH VALIDATION
+app.get('/api/v1/students/:id/courses', validateStudentId, async (req, res) => {
   try {
     const { id } = req.params
 
@@ -532,8 +557,8 @@ app.get('/api/v1/students/:id/courses', async (req, res) => {
   }
 })
 
-// Get student's weekly schedule
-app.get('/api/v1/students/:id/schedule', async (req, res) => {
+// Get student's weekly schedule - WITH VALIDATION
+app.get('/api/v1/students/:id/schedule', validateStudentId, async (req, res) => {
   try {
     const { id } = req.params
 
