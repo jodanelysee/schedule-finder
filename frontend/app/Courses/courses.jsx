@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useNavigate, useSearchParams } from 'react-router';
 import { RequireAuth } from '../components/RequireAuth';
 import { useAuth } from '../contexts/AuthContext';
@@ -28,34 +28,33 @@ const Courses = () => {
     fetchCourses();
   }, [searchParams]);
 
-  const fetchCourses = async () => {
-    setLoading(true);
-    setError(null);
-    
-    try {
-      const queryParams = new URLSearchParams();
-      Object.keys(filters).forEach(key => {
-        if (filters[key]) {
-          queryParams.append(key, filters[key]);
-        }
-      });
-
-      const response = await authenticatedFetch(`/api/v1/courses?${queryParams}`);
-      
-      if (!response.ok) {
-        throw new Error('Failed to fetch courses');
+  const fetchCourses = useCallback(async () => {
+  setLoading(true);
+  setError(null);
+  
+  try {
+    const queryParams = new URLSearchParams();
+    Object.keys(filters).forEach(key => {
+      if (filters[key]) {
+        queryParams.append(key, filters[key]);
       }
+    });
 
-      const data = await response.json();
-      setCourses(data.courses);
-      setPagination(data.pagination);
-    } catch (err) {
-      setError(err.message);
-      console.error('Error fetching courses:', err);
-    } finally {
-      setLoading(false);
-    }
-  };
+    const response = await authenticatedFetch(`/api/v1/courses?${queryParams}`);
+    const data = await response.json();
+    setCourses(data.courses);
+    setPagination(data.pagination);
+  } catch (err) {
+    setError(err.message);
+    console.error('Error fetching courses:', err);
+  } finally {
+    setLoading(false);
+  }
+}, [filters, authenticatedFetch]);
+
+useEffect(() => {
+  fetchCourses();
+}, [fetchCourses, searchParams]);
 
   const handleFilterChange = (key, value) => {
     const newFilters = { ...filters, [key]: value, page: 1 };

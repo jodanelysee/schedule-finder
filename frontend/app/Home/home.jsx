@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import { useState } from 'react';
 import { useNavigate } from 'react-router';
 import { RequireAuth } from '../components/RequireAuth';
 
@@ -34,8 +34,8 @@ const Home = () => {
             <div className="mt-6 p-4 bg-blue-50 rounded-lg">
               <p className="text-sm text-gray-700"><span className="font-semibold">Quick tips:</span></p>
               <ul className="mt-2 text-sm text-gray-600 space-y-1">
-                <li>• Search "CS-175" to see all sections (CS-175-01, CS-175-02, etc.)</li>
-                <li>• Search "AN-103-01" to see a specific section</li>
+                <li>• Search &quot;CS-175&quot; to see all sections (CS-175-01, CS-175-02, etc.)</li>
+                <li>• Search &quot;AN-103-01&quot; to see a specific section</li>
                 <li>• Or browse by department using the navigation above</li>
               </ul>
             </div>
