@@ -532,16 +532,32 @@ app.get('/api/v1/students/:id', validateStudentId, async (req, res) => {
   }
 })
 
-// Get student's enrolled courses - WITH VALIDATION
+// Get student's enrolled courses - WITH MEETING TIMES
 app.get('/api/v1/students/:id/courses', validateStudentId, async (req, res) => {
   try {
     const { id } = req.params
 
     const result = await pool.query(`
       SELECT 
-        c.course_id, c.course_name, c.course_title, c.credits, c.status,
+        c.course_id, 
+        c.course_name, 
+        c.course_title, 
+        c.credits, 
+        c.status,
         STRING_AGG(DISTINCT f.name, '; ') as instructors,
-        e.term
+        e.term,
+        -- Get meeting times as a JSON array
+        COALESCE(
+          (SELECT json_agg(json_build_object(
+            'day_of_week', cm.day_of_week,
+            'start_time', cm.start_time,
+            'end_time', cm.end_time,
+            'room', cm.room,
+            'building', cm.building
+          ))
+          FROM course_meetings cm
+          WHERE cm.course_id = c.course_id
+        ), '[]'::json) as meetings
       FROM enrollments e
       JOIN courses c ON e.course_id = c.course_id
       LEFT JOIN course_faculty cf ON c.course_id = cf.course_id
@@ -551,40 +567,67 @@ app.get('/api/v1/students/:id/courses', validateStudentId, async (req, res) => {
       ORDER BY c.course_name
     `, [id])
 
-    res.json(result.rows)
+    // Transform the data to include meeting info in the format your frontend expects
+    const transformedResults = result.rows.map(row => {
+      // Get the first meeting (or create a placeholder)
+      const meetings = row.meetings || [];
+      const firstMeeting = meetings[0] || {};
+      
+      return {
+        ...row,
+        day_of_week: firstMeeting.day_of_week,
+        start_time: firstMeeting.start_time,
+        end_time: firstMeeting.end_time,
+        room: firstMeeting.room,
+        building: firstMeeting.building,
+        meetings: meetings  // Keep full meetings array for schedule grid
+      };
+    });
+
+    res.json(transformedResults)
   } catch (error) {
+    console.error('Error fetching student courses:', error);
     res.status(500).json({ error: error.message })
   }
 })
 
-// Get student's weekly schedule - WITH VALIDATION
+// Get student's weekly schedule
 app.get('/api/v1/students/:id/schedule', validateStudentId, async (req, res) => {
   try {
     const { id } = req.params
 
     const result = await pool.query(`
       SELECT 
-        c.course_id, c.course_name, c.course_title,
-        cm.day_of_week, cm.start_time, cm.end_time, cm.room, cm.building,
-        STRING_AGG(DISTINCT f.name, '; ') as instructors
+        c.course_id, 
+        c.course_name, 
+        c.course_title,
+        cm.day_of_week, 
+        cm.start_time, 
+        cm.end_time, 
+        cm.room, 
+        cm.building,
+        cm.meeting_type
       FROM enrollments e
       JOIN courses c ON e.course_id = c.course_id
       LEFT JOIN course_meetings cm ON c.course_id = cm.course_id
-      LEFT JOIN course_faculty cf ON c.course_id = cf.course_id
-      LEFT JOIN faculty f ON cf.faculty_id = f.faculty_id
       WHERE e.student_id = $1
-      GROUP BY c.course_id, c.course_name, c.course_title, 
-               cm.day_of_week, cm.start_time, cm.end_time, cm.room, cm.building
+        AND cm.meeting_id IS NOT NULL
       ORDER BY 
         CASE cm.day_of_week
-          WHEN 'Monday' THEN 1 WHEN 'Tuesday' THEN 2
-          WHEN 'Wednesday' THEN 3 WHEN 'Thursday' THEN 4
+          WHEN 'Monday' THEN 1 
+          WHEN 'Tuesday' THEN 2
+          WHEN 'Wednesday' THEN 3 
+          WHEN 'Thursday' THEN 4
           WHEN 'Friday' THEN 5
-        END, cm.start_time
+          ELSE 6
+        END, 
+        cm.start_time
     `, [id])
 
+    console.log(`Found ${result.rows.length} meetings for student ${id}`);
     res.json(result.rows)
   } catch (error) {
+    console.error('Error fetching student schedule:', error);
     res.status(500).json({ error: error.message })
   }
 })

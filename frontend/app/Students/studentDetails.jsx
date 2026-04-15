@@ -10,7 +10,7 @@ const StudentDetails = () => {
   
   const [student, setStudent] = useState(null);
   const [courses, setCourses] = useState([]);
-  const [schedule, setSchedule] = useState(null);
+  const [schedule, setSchedule] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [activeTab, setActiveTab] = useState('info');
@@ -54,32 +54,12 @@ const StudentDetails = () => {
       const response = await authenticatedFetch(`/api/v1/students/${id}/schedule`);
       if (!response.ok) throw new Error('Failed to fetch schedule');
       const data = await response.json();
-      const gridData = convertToScheduleGrid(data);
-      setSchedule(gridData);
+      console.log('Schedule data received:', data);
+      setSchedule(Array.isArray(data) ? data : []);
     } catch (err) {
       console.error('Error fetching schedule:', err);
+      setSchedule([]);
     }
-  };
-
-  const convertToScheduleGrid = (coursesData) => {
-    const grid = { Monday: {}, Tuesday: {}, Wednesday: {}, Thursday: {}, Friday: {} };
-    if (!Array.isArray(coursesData)) return grid;
-
-    coursesData.forEach(course => {
-      const day = course.day_of_week;
-      if (!grid[day]) return;
-      const startTime = course.start_time ? course.start_time.substring(0, 5) : null;
-      if (!startTime) return;
-      if (!grid[day][startTime]) grid[day][startTime] = [];
-      grid[day][startTime].push({
-        course_name: course.course_name,
-        course_title: course.course_title,
-        room: course.room,
-        start_time: startTime,
-        end_time: course.end_time ? course.end_time.substring(0, 5) : null
-      });
-    });
-    return grid;
   };
 
   if (loading) {
@@ -224,7 +204,8 @@ const StudentDetails = () => {
                     <div className="overflow-x-auto">
                       <table className="min-w-full divide-y divide-gray-200">
                         <thead className="bg-gray-50">
-                          <tr><th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Course Code</th>
+                          <tr>
+                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Course Code</th>
                             <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Course Title</th>
                             <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Meeting Times</th>
                             <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Room</th>
@@ -236,13 +217,41 @@ const StudentDetails = () => {
                             <tr key={index} className="hover:bg-gray-50">
                               <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-blue-600">{course.course_name}</td>
                               <td className="px-6 py-4 text-sm text-gray-900">{course.course_title}</td>
-                              <td className="px-6 py-4 text-sm text-gray-900">{course.day_of_week && course.start_time && course.end_time ? `${course.day_of_week} ${course.start_time.substring(0, 5)} - ${course.end_time.substring(0, 5)}` : 'TBA'}</td>
-                              <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{course.room || 'TBA'}</td>
-                              <td className="px-6 py-4 whitespace-nowrap text-sm"><button onClick={() => navigate(`/courses/${course.course_id}`)} className="text-blue-600 hover:text-blue-800 font-medium">View Course</button></td>
+                              <td className="px-6 py-4 text-sm text-gray-900">
+                                {course.meetings && course.meetings.length > 0 ? (
+                                  <div>
+                                    {course.meetings.map((meeting, idx) => (
+                                      <div key={idx}>
+                                        {meeting.day_of_week} {meeting.start_time?.substring(0,5)} - {meeting.end_time?.substring(0,5)}
+                                        {idx < course.meetings.length - 1 && <br />}
+                                      </div>
+                                    ))}
+                                  </div>
+                                ) : (
+                                  'TBA'
+                                )}
+                              </td>
+                              <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                                {course.meetings && course.meetings.length > 0 ? (
+                                  <div>
+                                    {course.meetings.map((meeting, idx) => (
+                                      <div key={idx}>
+                                        {meeting.room || 'TBA'}
+                                        {idx < course.meetings.length - 1 && <br />}
+                                      </div>
+                                    ))}
+                                  </div>
+                                ) : (
+                                  'TBA'
+                                )}
+                              </td>
+                              <td className="px-6 py-4 whitespace-nowrap text-sm">
+                                <button onClick={() => navigate(`/courses/${course.course_id}`)} className="text-blue-600 hover:text-blue-800 font-medium">View Course</button>
+                              </td>
                             </tr>
                           ))}
                         </tbody>
-                       </table>
+                      </table>
                     </div>
                   )}
                 </div>
@@ -251,7 +260,11 @@ const StudentDetails = () => {
               {activeTab === 'schedule' && (
                 <div>
                   <h3 className="text-lg font-semibold text-gray-900 mb-4">Weekly Schedule</h3>
-                  {schedule ? <ScheduleGrid scheduleData={schedule} /> : <p className="text-gray-500 text-center py-8">No schedule data available.</p>}
+                  {schedule && schedule.length > 0 ? (
+                    <ScheduleGrid scheduleData={schedule} />
+                  ) : (
+                    <p className="text-gray-500 text-center py-8">No schedule data available.</p>
+                  )}
                 </div>
               )}
             </div>
@@ -264,19 +277,70 @@ const StudentDetails = () => {
 
 const ScheduleGrid = ({ scheduleData }) => {
   const days = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'];
-  const timeSlots = ['08:00', '08:30', '09:00', '09:30', '10:00', '10:30', '11:00', '11:30', '12:00', '12:30', '13:00', '13:30', '14:00', '14:30', '15:00', '15:30', '16:00', '16:30', '17:00', '17:30', '18:00', '18:30', '19:00', '19:30', '20:00'];
+  // Include all possible start times including 10:05 and 18:05
+  const timeSlots = [
+    '08:00', '08:30', '09:00', '09:30', '10:00', '10:05', '10:30', '11:00', '11:30',
+    '12:00', '12:30', '13:00', '13:30', '14:00', '14:30', '15:00', '15:30', '16:00',
+    '16:30', '17:00', '17:30', '18:00', '18:05', '18:30', '19:00', '19:30', '20:00'
+  ];
+
+  // Build grid from scheduleData array
+  const grid = { Monday: {}, Tuesday: {}, Wednesday: {}, Thursday: {}, Friday: {} };
+  
+  scheduleData.forEach(meeting => {
+    const day = meeting.day_of_week;
+    if (!grid[day]) return;
+    
+    // Format time to HH:MM for matching
+    const startTime = meeting.start_time ? meeting.start_time.substring(0, 5) : null;
+    if (!startTime) return;
+    
+    if (!grid[day][startTime]) {
+      grid[day][startTime] = [];
+    }
+    
+    grid[day][startTime].push({
+      course_name: meeting.course_name,
+      course_title: meeting.course_title,
+      room: meeting.room,
+      start_time: startTime,
+      end_time: meeting.end_time ? meeting.end_time.substring(0, 5) : null
+    });
+  });
 
   return (
     <div className="overflow-x-auto">
       <table className="min-w-full border-collapse border border-gray-300">
-        <thead><tr className="bg-gray-100"><th className="border border-gray-300 px-4 py-2 text-sm font-semibold text-gray-700 sticky left-0 bg-gray-100">Time</th>{days.map(day => <th key={day} className="border border-gray-300 px-4 py-2 text-sm font-semibold text-gray-700 min-w-[200px]">{day}</th>)}</tr></thead>
+        <thead>
+          <tr className="bg-gray-100">
+            <th className="border border-gray-300 px-4 py-2 text-sm font-semibold text-gray-700 sticky left-0 bg-gray-100">Time</th>
+            {days.map(day => <th key={day} className="border border-gray-300 px-4 py-2 text-sm font-semibold text-gray-700 min-w-[200px]">{day}</th>)}
+          </tr>
+        </thead>
         <tbody>
           {timeSlots.map(time => (
             <tr key={time}>
               <td className="border border-gray-300 px-4 py-2 text-sm font-medium text-gray-600 bg-gray-50 sticky left-0">{time}</td>
               {days.map(day => {
-                const courses = scheduleData[day]?.[time] || [];
-                return <td key={`${day}-${time}`} className="border border-gray-300 p-1 align-top">{courses.length > 0 ? <div className="space-y-1">{courses.map((course, idx) => <div key={idx} className="bg-green-100 border-l-4 border-green-600 p-2 text-xs rounded"><div className="font-semibold text-green-900">{course.course_name}</div><div className="text-green-700">{course.course_title}</div>{course.room && <div className="text-green-600 text-xs">{course.room}</div>}{course.end_time && <div className="text-green-600 text-xs">Until {course.end_time}</div>}</div>)}</div> : <div className="h-16"></div>}</td>;
+                const courses = grid[day]?.[time] || [];
+                return (
+                  <td key={`${day}-${time}`} className="border border-gray-300 p-1 align-top">
+                    {courses.length > 0 ? (
+                      <div className="space-y-1">
+                        {courses.map((course, idx) => (
+                          <div key={idx} className="bg-green-100 border-l-4 border-green-600 p-2 text-xs rounded">
+                            <div className="font-semibold text-green-900">{course.course_name}</div>
+                            <div className="text-green-700">{course.course_title}</div>
+                            {course.room && <div className="text-green-600 text-xs">{course.room}</div>}
+                            {course.end_time && <div className="text-green-600 text-xs">Until {course.end_time}</div>}
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <div className="h-16"></div>
+                    )}
+                  </td>
+                );
               })}
             </tr>
           ))}
