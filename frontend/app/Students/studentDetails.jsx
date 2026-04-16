@@ -24,7 +24,6 @@ const StudentDetails = () => {
   const fetchStudentDetails = async () => {
     setLoading(true);
     setError(null);
-    
     try {
       const response = await authenticatedFetch(`/api/v1/students/${id}`);
       if (!response.ok) throw new Error('Failed to fetch student details');
@@ -227,9 +226,7 @@ const StudentDetails = () => {
                                       </div>
                                     ))}
                                   </div>
-                                ) : (
-                                  'TBA'
-                                )}
+                                ) : 'TBA'}
                               </td>
                               <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
                                 {course.meetings && course.meetings.length > 0 ? (
@@ -241,9 +238,7 @@ const StudentDetails = () => {
                                       </div>
                                     ))}
                                   </div>
-                                ) : (
-                                  'TBA'
-                                )}
+                                ) : 'TBA'}
                               </td>
                               <td className="px-6 py-4 whitespace-nowrap text-sm">
                                 <button onClick={() => navigate(`/courses/${course.course_id}`)} className="text-blue-600 hover:text-blue-800 font-medium">View Course</button>
@@ -275,77 +270,139 @@ const StudentDetails = () => {
   );
 };
 
+// ─── helpers ────────────────────────────────────────────────────────────────
+
+/** Convert "HH:MM" to total minutes since midnight */
+const toMinutes = (timeStr) => {
+  if (!timeStr) return null;
+  const [h, m] = timeStr.substring(0, 5).split(':').map(Number);
+  return h * 60 + m;
+};
+
+/**
+ * The full visible time range we render.
+ * Adjust DAY_START / DAY_END to widen/shrink the grid.
+ */
+const DAY_START = 8 * 60 + 0;   // 08:00
+const DAY_END   = 21 * 60 + 30; // 21:30
+const TOTAL_MINS = DAY_END - DAY_START;
+
+/** px per minute — controls overall grid height */
+const PX_PER_MIN = 1.4;
+
+/** Hour labels shown on the left axis */
+const HOUR_LABELS = Array.from({ length: Math.ceil(TOTAL_MINS / 60) + 1 }, (_, i) => {
+  const totalMin = DAY_START + i * 60;
+  const h = Math.floor(totalMin / 60);
+  const m = totalMin % 60;
+  if (h > Math.floor(DAY_END / 60)) return null;
+  return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
+}).filter(Boolean);
+
+// ─── ScheduleGrid (student view) ────────────────────────────────────────────
+
 const ScheduleGrid = ({ scheduleData }) => {
   const days = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'];
-  // Include all possible start times including 10:05 and 18:05
-  const timeSlots = [
-    '08:00', '08:30', '09:00', '09:30', '10:00', '10:05', '10:30', '11:00', '11:30',
-    '12:00', '12:30', '13:00', '13:30', '14:00', '14:30', '15:00', '15:30', '16:00',
-    '16:30', '17:00', '17:30', '18:00', '18:05', '18:30', '19:00', '19:30', '20:00'
-  ];
 
-  // Build grid from scheduleData array
-  const grid = { Monday: {}, Tuesday: {}, Wednesday: {}, Thursday: {}, Friday: {} };
-  
+  // Group meetings by day
+  const byDay = { Monday: [], Tuesday: [], Wednesday: [], Thursday: [], Friday: [] };
   scheduleData.forEach(meeting => {
     const day = meeting.day_of_week;
-    if (!grid[day]) return;
-    
-    // Format time to HH:MM for matching
-    const startTime = meeting.start_time ? meeting.start_time.substring(0, 5) : null;
-    if (!startTime) return;
-    
-    if (!grid[day][startTime]) {
-      grid[day][startTime] = [];
-    }
-    
-    grid[day][startTime].push({
-      course_name: meeting.course_name,
+    if (!byDay[day]) return;
+    const startMin = toMinutes(meeting.start_time);
+    const endMin   = toMinutes(meeting.end_time);
+    if (startMin === null) return;
+    byDay[day].push({
+      course_name:  meeting.course_name,
       course_title: meeting.course_title,
-      room: meeting.room,
-      start_time: startTime,
-      end_time: meeting.end_time ? meeting.end_time.substring(0, 5) : null
+      room:         meeting.room,
+      startMin,
+      endMin: endMin ?? startMin + 75, // fallback 75-min class
     });
   });
 
+  const gridHeight = TOTAL_MINS * PX_PER_MIN;
+
   return (
     <div className="overflow-x-auto">
-      <table className="min-w-full border-collapse border border-gray-300">
-        <thead>
-          <tr className="bg-gray-100">
-            <th className="border border-gray-300 px-4 py-2 text-sm font-semibold text-gray-700 sticky left-0 bg-gray-100">Time</th>
-            {days.map(day => <th key={day} className="border border-gray-300 px-4 py-2 text-sm font-semibold text-gray-700 min-w-[200px]">{day}</th>)}
-          </tr>
-        </thead>
-        <tbody>
-          {timeSlots.map(time => (
-            <tr key={time}>
-              <td className="border border-gray-300 px-4 py-2 text-sm font-medium text-gray-600 bg-gray-50 sticky left-0">{time}</td>
-              {days.map(day => {
-                const courses = grid[day]?.[time] || [];
+      <div className="flex" style={{ minWidth: 700 }}>
+
+        {/* Time axis */}
+        <div className="flex-shrink-0 w-16 relative" style={{ height: gridHeight + 32 }}>
+          {/* header spacer */}
+          <div className="h-8" />
+          <div className="relative" style={{ height: gridHeight }}>
+            {HOUR_LABELS.map(label => {
+              const top = (toMinutes(label) - DAY_START) * PX_PER_MIN;
+              return (
+                <div
+                  key={label}
+                  className="absolute right-2 text-xs text-gray-400 leading-none"
+                  style={{ top: top - 6 }}
+                >
+                  {label}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+
+        {/* Day columns */}
+        {days.map(day => (
+          <div key={day} className="flex-1 min-w-[140px]">
+            {/* Day header */}
+            <div className="h-8 flex items-center justify-center text-sm font-semibold text-gray-700 border-b border-gray-200 bg-gray-50">
+              {day}
+            </div>
+
+            {/* Column body */}
+            <div
+              className="relative border-l border-gray-200"
+              style={{ height: gridHeight }}
+            >
+              {/* Hour grid lines */}
+              {HOUR_LABELS.map(label => {
+                const top = (toMinutes(label) - DAY_START) * PX_PER_MIN;
                 return (
-                  <td key={`${day}-${time}`} className="border border-gray-300 p-1 align-top">
-                    {courses.length > 0 ? (
-                      <div className="space-y-1">
-                        {courses.map((course, idx) => (
-                          <div key={idx} className="bg-green-100 border-l-4 border-green-600 p-2 text-xs rounded">
-                            <div className="font-semibold text-green-900">{course.course_name}</div>
-                            <div className="text-green-700">{course.course_title}</div>
-                            {course.room && <div className="text-green-600 text-xs">{course.room}</div>}
-                            {course.end_time && <div className="text-green-600 text-xs">Until {course.end_time}</div>}
-                          </div>
-                        ))}
-                      </div>
-                    ) : (
-                      <div className="h-16"></div>
-                    )}
-                  </td>
+                  <div
+                    key={label}
+                    className="absolute left-0 right-0 border-t border-gray-100"
+                    style={{ top }}
+                  />
                 );
               })}
-            </tr>
-          ))}
-        </tbody>
-      </table>
+
+              {/* Course blocks */}
+              {byDay[day].map((course, idx) => {
+                const top    = (course.startMin - DAY_START) * PX_PER_MIN;
+                const height = (course.endMin - course.startMin) * PX_PER_MIN;
+                return (
+                  <div
+                    key={idx}
+                    className="absolute left-1 right-1 bg-green-100 border-l-4 border-green-500 rounded shadow-sm overflow-hidden px-2 py-1"
+                    style={{ top, height, minHeight: 24 }}
+                    title={`${course.course_name} — ${course.course_title}${course.room ? ` (${course.room})` : ''}`}
+                  >
+                    <div className="text-xs font-semibold text-green-900 truncate leading-tight">
+                      {course.course_name}
+                    </div>
+                    {height > 32 && (
+                      <div className="text-xs text-green-700 truncate leading-tight">
+                        {course.course_title}
+                      </div>
+                    )}
+                    {height > 48 && course.room && (
+                      <div className="text-xs text-green-600 truncate leading-tight">
+                        {course.room}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        ))}
+      </div>
     </div>
   );
 };

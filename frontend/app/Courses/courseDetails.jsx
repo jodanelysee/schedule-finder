@@ -29,7 +29,6 @@ const CourseDetails = () => {
   const fetchCourseDetails = async () => {
     setLoading(true);
     setError(null);
-    
     try {
       const response = await authenticatedFetch(`/api/v1/courses/${id}`);
       if (!response.ok) throw new Error('Failed to fetch course details');
@@ -47,7 +46,7 @@ const CourseDetails = () => {
     try {
       const queryParams = new URLSearchParams();
       if (filters.athlete) queryParams.append('athlete', 'true');
-      if (filters.honors) queryParams.append('honors', 'true');
+      if (filters.honors)  queryParams.append('honors', 'true');
       if (filters.program) queryParams.append('program', filters.program);
 
       const response = await authenticatedFetch(`/api/v1/courses/${id}/students?${queryParams}`);
@@ -62,10 +61,9 @@ const CourseDetails = () => {
     try {
       const response = await authenticatedFetch(`/api/v1/courses/${id}/schedule`);
       const data = await response.json();
-      
+
       if (Array.isArray(data) && data.length > 0) {
-        const gridData = convertToScheduleGrid(data);
-        setScheduleGrid({ schedule: gridData });
+        setScheduleGrid({ raw: data });
       } else {
         setScheduleGrid(null);
       }
@@ -73,40 +71,6 @@ const CourseDetails = () => {
       console.error('Error fetching schedule:', err);
       setScheduleGrid(null);
     }
-  };
-
-  const convertToScheduleGrid = (studentsData) => {
-    const grid = {
-      Monday: {},
-      Tuesday: {},
-      Wednesday: {},
-      Thursday: {},
-      Friday: {}
-    };
-
-    studentsData.forEach(student => {
-      const studentName = student.first_name || student.student_id;
-      if (!student.courses || student.courses.length === 0) return;
-
-      student.courses.forEach(course => {
-        const day = course.day_of_week;
-        if (!grid[day]) return;
-        
-        const startTime = course.start_time ? course.start_time.substring(0, 5) : null;
-        if (!startTime) return;
-        
-        if (!grid[day][startTime]) grid[day][startTime] = [];
-        
-        grid[day][startTime].push({
-          course_name: course.course_name,
-          student_name: studentName,
-          course_title: course.course_title,
-          room: course.room
-        });
-      });
-    });
-
-    return grid;
   };
 
   useEffect(() => {
@@ -186,22 +150,10 @@ const CourseDetails = () => {
             </div>
 
             <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mt-6 pt-6 border-t border-gray-200">
-              <div>
-                <p className="text-sm text-gray-500">Instructor</p>
-                <p className="font-semibold text-gray-900">{course.instructors || 'TBA'}</p>
-              </div>
-              <div>
-                <p className="text-sm text-gray-500">Credits</p>
-                <p className="font-semibold text-gray-900">{course.credits}</p>
-              </div>
-              <div>
-                <p className="text-sm text-gray-500">Enrollment</p>
-                <p className="font-semibold text-gray-900">{course.capacity - course.available} / {course.capacity}</p>
-              </div>
-              <div>
-                <p className="text-sm text-gray-500">Available Seats</p>
-                <p className="font-semibold text-gray-900">{course.available}</p>
-              </div>
+              <div><p className="text-sm text-gray-500">Instructor</p><p className="font-semibold text-gray-900">{course.instructors || 'TBA'}</p></div>
+              <div><p className="text-sm text-gray-500">Credits</p><p className="font-semibold text-gray-900">{course.credits}</p></div>
+              <div><p className="text-sm text-gray-500">Enrollment</p><p className="font-semibold text-gray-900">{course.capacity - course.available} / {course.capacity}</p></div>
+              <div><p className="text-sm text-gray-500">Available Seats</p><p className="font-semibold text-gray-900">{course.available}</p></div>
             </div>
 
             {course.meetings && course.meetings.length > 0 && (
@@ -319,7 +271,10 @@ const CourseDetails = () => {
               {activeTab === 'schedule' && (
                 <div>
                   <h3 className="text-lg font-semibold text-gray-900 mb-4">Combined Student Schedule Grid</h3>
-                  {scheduleGrid && scheduleGrid.schedule ? <ScheduleGrid scheduleData={scheduleGrid.schedule} /> : <p className="text-gray-500 text-center py-8">No schedule data available.</p>}
+                  {scheduleGrid && scheduleGrid.raw
+                    ? <CourseScheduleGrid studentsData={scheduleGrid.raw} />
+                    : <p className="text-gray-500 text-center py-8">No schedule data available.</p>
+                  }
                 </div>
               )}
             </div>
@@ -330,44 +285,180 @@ const CourseDetails = () => {
   );
 };
 
-const ScheduleGrid = ({ scheduleData }) => {
+// ─── helpers ────────────────────────────────────────────────────────────────
+
+const toMinutes = (timeStr) => {
+  if (!timeStr) return null;
+  const [h, m] = timeStr.substring(0, 5).split(':').map(Number);
+  return h * 60 + m;
+};
+
+const DAY_START  = 8 * 60 + 0;
+const DAY_END    = 21 * 60 + 30;
+const TOTAL_MINS = DAY_END - DAY_START;
+const PX_PER_MIN = 1.4;
+
+const HOUR_LABELS = Array.from({ length: Math.ceil(TOTAL_MINS / 60) + 1 }, (_, i) => {
+  const totalMin = DAY_START + i * 60;
+  const h = Math.floor(totalMin / 60);
+  const m = totalMin % 60;
+  if (h > Math.floor(DAY_END / 60)) return null;
+  return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
+}).filter(Boolean);
+
+/** Palette of distinct colors for different students */
+const STUDENT_COLORS = [
+  { bg: 'bg-blue-100',   border: 'border-blue-500',   title: 'text-blue-900',   sub: 'text-blue-700' },
+  { bg: 'bg-purple-100', border: 'border-purple-500', title: 'text-purple-900', sub: 'text-purple-700' },
+  { bg: 'bg-orange-100', border: 'border-orange-500', title: 'text-orange-900', sub: 'text-orange-700' },
+  { bg: 'bg-pink-100',   border: 'border-pink-500',   title: 'text-pink-900',   sub: 'text-pink-700' },
+  { bg: 'bg-teal-100',   border: 'border-teal-500',   title: 'text-teal-900',   sub: 'text-teal-700' },
+  { bg: 'bg-yellow-100', border: 'border-yellow-500', title: 'text-yellow-900', sub: 'text-yellow-700' },
+];
+
+// ─── CourseScheduleGrid ──────────────────────────────────────────────────────
+/**
+ * Shows each student as a named column within each day.
+ * When multiple students share the same time slot the columns sit side-by-side
+ * and the whole grid scrolls horizontally.
+ *
+ * studentsData shape:  Array<{ first_name, student_id, courses: [{ day_of_week, course_name, course_title, start_time, end_time, room }] }>
+ */
+const CourseScheduleGrid = ({ studentsData }) => {
   const days = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'];
-  const timeSlots = ['08:00', '08:30', '09:00', '09:30', '10:00', '10:30', '11:00', '11:30', '12:00', '12:30', '13:00', '13:30', '14:00', '14:30', '15:00', '15:30', '16:00', '16:30', '17:00', '17:30', '18:00', '18:30', '19:00', '19:30', '20:00'];
+
+  // Build student list + assign colors
+  const studentList = studentsData.map((s, i) => ({
+    id:    s.student_id,
+    name:  s.first_name || s.student_id,
+    color: STUDENT_COLORS[i % STUDENT_COLORS.length],
+  }));
+
+  // Index events:  byDay[day][studentId] = [{ ...event }]
+  const byDay = {};
+  days.forEach(d => { byDay[d] = {}; });
+
+  studentsData.forEach(student => {
+    const sid = student.student_id;
+    if (!student.courses) return;
+    student.courses.forEach(course => {
+      const day = course.day_of_week;
+      if (!byDay[day]) return;
+      if (!byDay[day][sid]) byDay[day][sid] = [];
+      const startMin = toMinutes(course.start_time);
+      const endMin   = toMinutes(course.end_time);
+      if (startMin === null) return;
+      byDay[day][sid].push({
+        course_name:  course.course_name,
+        course_title: course.course_title,
+        room:         course.room,
+        startMin,
+        endMin: endMin ?? startMin + 75,
+      });
+    });
+  });
+
+  const gridHeight  = TOTAL_MINS * PX_PER_MIN;
+  // Each student sub-column width (px) — narrower so many fit without scrolling too far
+  const COL_WIDTH   = 110;
 
   return (
     <div className="overflow-x-auto">
-      <table className="min-w-full border-collapse border border-gray-300">
-        <thead>
-          <tr className="bg-gray-100">
-            <th className="border border-gray-300 px-4 py-2 text-sm font-semibold text-gray-700">Time</th>
-            {days.map(day => <th key={day} className="border border-gray-300 px-4 py-2 text-sm font-semibold text-gray-700">{day}</th>)}
-          </tr>
-        </thead>
-        <tbody>
-          {timeSlots.map(time => (
-            <tr key={time}>
-              <td className="border border-gray-300 px-4 py-2 text-sm font-medium text-gray-600 bg-gray-50">{time}</td>
-              {days.map(day => {
-                const courses = scheduleData[day]?.[time] || [];
-                return (
-                  <td key={`${day}-${time}`} className="border border-gray-300 p-1">
-                    {courses.length > 0 ? (
-                      <div className="space-y-1">
-                        {courses.map((course, idx) => (
-                          <div key={idx} className="bg-blue-100 border-l-4 border-blue-600 p-2 text-xs rounded">
-                            <div className="font-semibold text-blue-900">{course.course_name}</div>
-                            <div className="text-blue-700">{course.student_name}</div>
-                          </div>
-                        ))}
-                      </div>
-                    ) : <div className="h-12"></div>}
-                  </td>
-                );
-              })}
-            </tr>
+      {/* Legend */}
+      {studentList.length > 0 && (
+        <div className="flex flex-wrap gap-2 mb-3">
+          {studentList.map(s => (
+            <div key={s.id} className={`flex items-center gap-1 px-2 py-1 rounded text-xs font-medium ${s.color.bg} ${s.color.title}`}>
+              <div className={`w-2 h-2 rounded-full border-2 ${s.color.border}`} />
+              {s.name}
+            </div>
           ))}
-        </tbody>
-      </table>
+        </div>
+      )}
+
+      <div className="flex" style={{ minWidth: 80 + days.length * studentList.length * COL_WIDTH }}>
+
+        {/* Time axis */}
+        <div className="flex-shrink-0 w-16 relative" style={{ height: gridHeight + 48 }}>
+          <div className="h-12" />
+          <div className="relative" style={{ height: gridHeight }}>
+            {HOUR_LABELS.map(label => {
+              const top = (toMinutes(label) - DAY_START) * PX_PER_MIN;
+              return (
+                <div
+                  key={label}
+                  className="absolute right-2 text-xs text-gray-400 leading-none"
+                  style={{ top: top - 6 }}
+                >
+                  {label}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+
+        {/* Day groups */}
+        {days.map(day => (
+          <div key={day} className="border-l border-gray-200" style={{ width: studentList.length * COL_WIDTH }}>
+            {/* Day header */}
+            <div className="h-8 flex items-center justify-center text-sm font-semibold text-gray-700 border-b border-gray-200 bg-gray-50">
+              {day}
+            </div>
+
+            {/* Student columns */}
+            <div className="flex relative" style={{ height: gridHeight }}>
+              {/* Hour grid lines — drawn once behind all columns */}
+              <div className="absolute inset-0 pointer-events-none">
+                {HOUR_LABELS.map(label => {
+                  const top = (toMinutes(label) - DAY_START) * PX_PER_MIN;
+                  return (
+                    <div
+                      key={label}
+                      className="absolute left-0 right-0 border-t border-gray-100"
+                      style={{ top }}
+                    />
+                  );
+                })}
+              </div>
+
+              {studentList.map(s => (
+                <div
+                  key={s.id}
+                  className="relative border-r border-gray-100"
+                  style={{ width: COL_WIDTH, height: gridHeight, flexShrink: 0 }}
+                >
+                  {(byDay[day][s.id] || []).map((course, idx) => {
+                    const top    = (course.startMin - DAY_START) * PX_PER_MIN;
+                    const height = (course.endMin - course.startMin) * PX_PER_MIN;
+                    return (
+                      <div
+                        key={idx}
+                        className={`absolute left-1 right-1 border-l-4 rounded shadow-sm overflow-hidden px-1.5 py-1 ${s.color.bg} ${s.color.border}`}
+                        style={{ top, height, minHeight: 22 }}
+                        title={`${s.name}: ${course.course_name} — ${course.course_title}${course.room ? ` (${course.room})` : ''}`}
+                      >
+                        <div className={`text-xs font-semibold truncate leading-tight ${s.color.title}`}>
+                          {course.course_name}
+                        </div>
+                        {height > 30 && (
+                          <div className={`text-xs truncate leading-tight ${s.color.sub}`}>
+                            {course.course_title}
+                          </div>
+                        )}
+                        {height > 46 && course.room && (
+                          <div className={`text-xs truncate leading-tight ${s.color.sub}`}>
+                            {course.room}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              ))}
+            </div>
+          </div>
+        ))}
+      </div>
     </div>
   );
 };
