@@ -131,6 +131,7 @@ app.get('/api/v1/programs', async (req, res) => {
 // COURSE ROUTES 
 
 // Get all courses with filtering - WITH VALIDATION
+// In backend/index.js, around line 145, add this logging:
 app.get('/api/v1/courses', validateCourseSearch, async (req, res) => {
   try {
     const { 
@@ -138,6 +139,12 @@ app.get('/api/v1/courses', validateCourseSearch, async (req, res) => {
       start_date, end_date, level,
       page = 1, limit = 50 
     } = req.query
+
+    // Add debug logging
+    console.log('=== COURSES REQUEST ===');
+    console.log('Department filter:', department);
+    console.log('Search filter:', search);
+    console.log('Professor filter:', professor);
 
     let query = `
       SELECT 
@@ -156,9 +163,13 @@ app.get('/api/v1/courses', validateCourseSearch, async (req, res) => {
       query += ` AND (c.course_name ILIKE $${params.length} OR c.course_title ILIKE $${params.length})`
     }
     if (department) {
-      params.push(`${department}-%`)
-      query += ` AND c.course_name LIKE $${params.length}`
+      // Make sure department is treated as a string
+      const deptValue = String(department);
+      params.push(`%${deptValue}%`)
+      query += ` AND c.course_name ILIKE $${params.length}`
+      console.log('Department query with:', `%${deptValue}%`);
     }
+    // ... rest of your code
     if (professor) {
       params.push(`%${professor}%`)
       query += ` AND EXISTS (
@@ -212,9 +223,9 @@ app.get('/api/v1/courses', validateCourseSearch, async (req, res) => {
       countQuery += ` AND (c.course_name ILIKE $${countParams.length} OR c.course_title ILIKE $${countParams.length})`
     }
     if (department) {
-      countParams.push(`${department}-%`)
-      countQuery += ` AND c.course_name LIKE $${countParams.length}`
-    }
+  countParams.push(`%${department}%`)
+  countQuery += ` AND c.course_name ILIKE $${countParams.length}`
+}
     if (professor) {
       countParams.push(`%${professor}%`)
       countQuery += ` AND f.name ILIKE $${countParams.length}`
@@ -333,13 +344,13 @@ app.get('/api/v1/courses/:id/students', validateCourseId, async (req, res) => {
     if (athlete === 'true') query += ` AND s.athlete_flag = true`
     if (honors === 'true') query += ` AND s.honors_flag = true`
     if (program) {
-      params.push(`%${program}%`)
-      query += ` AND EXISTS (
-        SELECT 1 FROM student_programs sp2
-        JOIN programs p2 ON sp2.program_id = p2.program_id
-        WHERE sp2.student_id = s.student_id AND p2.program_code ILIKE $${params.length}
-      )`
-    }
+  params.push(`%${program}%`)
+  query += ` AND EXISTS (
+    SELECT 1 FROM student_programs sp2
+    JOIN programs p2 ON sp2.program_id = p2.program_id
+    WHERE sp2.student_id = s.student_id AND p2.program_code ILIKE $${params.length}
+  )`
+}
 
     query += ` GROUP BY s.student_id ORDER BY s.last_name, s.first_name`
 
@@ -461,9 +472,9 @@ app.get('/api/v1/students', validateStudentSearch, async (req, res) => {
       )`
     }
     if (graduating) {
-      params.push(`${graduating}%`)
-      query += ` AND s.anticipated_completion_date::text LIKE $${params.length}`
-    }
+  params.push(`%${graduating}%`)
+  query += ` AND s.anticipated_completion_date::text ILIKE $${params.length}`
+}
     if (level === 'undergraduate') {
       query += ` AND (s.completed_credits_ug > 0 OR s.completed_credits_gr = 0)`
     }

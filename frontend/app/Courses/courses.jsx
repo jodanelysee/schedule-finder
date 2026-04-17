@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { useNavigate, useSearchParams } from 'react-router';
 import { RequireAuth } from '../components/RequireAuth';
 import { useAuth } from '../contexts/AuthContext';
@@ -8,10 +8,11 @@ const Courses = () => {
   const [courses, setCourses] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
-  const [pagination, setPagination] = useState({});
+  const [pagination, setPagination] = useState({ page: 1, totalPages: 1, total: 0 });
   
   const [searchParams, setSearchParams] = useSearchParams();
   const navigate = useNavigate();
+  const debounceTimerRef = useRef(null);
   
   const [filters, setFilters] = useState({
     search: searchParams.get('search') || '',
@@ -24,50 +25,70 @@ const Courses = () => {
     limit: 20
   });
 
-  useEffect(() => {
-    fetchCourses();
-  }, [searchParams]);
-
   const fetchCourses = useCallback(async () => {
-  setLoading(true);
-  setError(null);
-  
-  try {
-    const queryParams = new URLSearchParams();
-    Object.keys(filters).forEach(key => {
-      if (filters[key]) {
-        queryParams.append(key, filters[key]);
+    setLoading(true);
+    setError(null);
+    
+    try {
+      const queryParams = new URLSearchParams();
+      Object.keys(filters).forEach(key => {
+        if (filters[key] && key !== 'limit') {
+          queryParams.append(key, filters[key]);
+        }
+      });
+      queryParams.append('limit', filters.limit);
+
+      const response = await authenticatedFetch(`/api/v1/courses?${queryParams}`);
+      
+      if (!response.ok) {
+        throw new Error('Failed to fetch courses');
       }
-    });
+      
+      const data = await response.json();
+      setCourses(data.courses || []);
+      setPagination(data.pagination || { page: filters.page, totalPages: 1, total: 0 });
+    } catch (err) {
+      setError(err.message);
+      console.error('Error fetching courses:', err);
+      setCourses([]);
+      setPagination({ page: filters.page, totalPages: 1, total: 0 });
+    } finally {
+      setLoading(false);
+    }
+  }, [filters, authenticatedFetch]);
 
-    const response = await authenticatedFetch(`/api/v1/courses?${queryParams}`);
-    const data = await response.json();
-    setCourses(data.courses);
-    setPagination(data.pagination);
-  } catch (err) {
-    setError(err.message);
-    console.error('Error fetching courses:', err);
-  } finally {
-    setLoading(false);
-  }
-}, [filters, authenticatedFetch]);
-
-useEffect(() => {
-  fetchCourses();
-}, [fetchCourses, searchParams]);
+  // Debounced fetch to avoid too many API calls while typing
+  useEffect(() => {
+    if (debounceTimerRef.current) {
+      clearTimeout(debounceTimerRef.current);
+    }
+    
+    debounceTimerRef.current = setTimeout(() => {
+      fetchCourses();
+    }, 300);
+    
+    return () => {
+      if (debounceTimerRef.current) {
+        clearTimeout(debounceTimerRef.current);
+      }
+    };
+  }, [fetchCourses]);
 
   const handleFilterChange = (key, value) => {
-    const newFilters = { ...filters, [key]: value, page: 1 };
-    setFilters(newFilters);
-    
-    const newParams = new URLSearchParams();
-    Object.keys(newFilters).forEach(k => {
-      if (newFilters[k] && k !== 'limit') {
-        newParams.set(k, newFilters[k]);
-      }
-    });
-    setSearchParams(newParams);
-  };
+  // For department filter, trim whitespace but preserve case for display
+  const processedValue = key === 'department' ? value.trim() : value;
+  const newFilters = { ...filters, [key]: processedValue, page: 1 };
+  setFilters(newFilters);
+  
+  // Update URL params
+  const newParams = new URLSearchParams();
+  Object.keys(newFilters).forEach(k => {
+    if (newFilters[k] && k !== 'limit') {
+      newParams.set(k, newFilters[k]);
+    }
+  });
+  setSearchParams(newParams);
+};
 
   const handlePageChange = (newPage) => {
     const newFilters = { ...filters, page: newPage };
@@ -101,12 +122,13 @@ useEffect(() => {
           <div className="mb-8">
             <h1 className="text-3xl font-bold text-gray-900 mb-2">Courses</h1>
             <p className="text-gray-600">
-              {pagination.total ? `${pagination.total} courses available` : 'Loading courses...'}
+              {pagination?.total ? `${pagination.total} courses available` : 'Loading courses...'}
             </p>
           </div>
 
           <div className="bg-white rounded-lg shadow-md p-6 mb-6">
             <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-4 gap-4">
+              {/* Search */}
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">Search</label>
                 <input
@@ -118,17 +140,20 @@ useEffect(() => {
                 />
               </div>
 
+              {/* Department - Now works like professor filter! */}
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">Department</label>
                 <input
                   type="text"
                   value={filters.department}
                   onChange={(e) => handleFilterChange('department', e.target.value)}
-                  placeholder="e.g., CS"
+                  placeholder="e.g., CS, MA, EN (partial match)"
                   className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                 />
+                <p className="text-xs text-gray-400 mt-1">Type to filter departments (e.g., "c" finds CS, CJ, CO)</p>
               </div>
 
+              {/* Professor */}
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">Professor</label>
                 <input
@@ -140,6 +165,7 @@ useEffect(() => {
                 />
               </div>
 
+              {/* Status */}
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">Status</label>
                 <select
@@ -153,6 +179,7 @@ useEffect(() => {
                 </select>
               </div>
 
+              {/* Term */}
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">Term</label>
                 <select
@@ -165,6 +192,7 @@ useEffect(() => {
                 </select>
               </div>
 
+              {/* Level */}
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">Level</label>
                 <select
@@ -178,6 +206,7 @@ useEffect(() => {
                 </select>
               </div>
 
+              {/* Clear Filters Button */}
               <div className="flex items-end">
                 <button
                   onClick={clearFilters}
@@ -264,22 +293,22 @@ useEffect(() => {
                 </div>
               </div>
 
-              {pagination.totalPages > 1 && (
+              {pagination?.totalPages > 1 && (
                 <div className="mt-6 flex items-center justify-between">
                   <div className="text-sm text-gray-700">
-                    Showing page {pagination.page} of {pagination.totalPages}
+                    Showing page {pagination?.page || 1} of {pagination?.totalPages || 1}
                   </div>
                   <div className="flex gap-2">
                     <button
-                      onClick={() => handlePageChange(pagination.page - 1)}
-                      disabled={pagination.page === 1}
+                      onClick={() => handlePageChange((pagination?.page || 1) - 1)}
+                      disabled={pagination?.page === 1 || !pagination?.page}
                       className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
                     >
                       Previous
                     </button>
                     <button
-                      onClick={() => handlePageChange(pagination.page + 1)}
-                      disabled={pagination.page === pagination.totalPages}
+                      onClick={() => handlePageChange((pagination?.page || 1) + 1)}
+                      disabled={pagination?.page === pagination?.totalPages || !pagination?.totalPages}
                       className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
                     >
                       Next

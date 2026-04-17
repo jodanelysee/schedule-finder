@@ -30,7 +30,6 @@ const validateLogin = [
   handleValidationErrors
 ];
 
-// ============ COURSE VALIDATION ============
 const validateCourseSearch = [
   query('search')
     .optional()
@@ -40,9 +39,11 @@ const validateCourseSearch = [
     .escape(),
   query('department')
     .optional()
-    .matches(/^[A-Z]{2,4}$/).withMessage('Department must be 2-4 uppercase letters (e.g., CS, MATH)')
+    .isString().withMessage('Department must be text')
+    .isLength({ min: 1, max: 10 }).withMessage('Department too long')
     .trim()
-    .toUpperCase(), // Sanitizes to uppercase
+    // Allow any case - no uppercase enforcement
+    .customSanitizer(value => value),
   query('professor')
     .optional()
     .isString().withMessage('Professor name must be text')
@@ -64,7 +65,7 @@ const validateCourseSearch = [
   query('page')
     .optional()
     .isInt({ min: 1, max: 1000 }).withMessage('Page must be between 1 and 1000')
-    .toInt(), // Converts string to integer
+    .toInt(),
   query('limit')
     .optional()
     .isInt({ min: 1, max: 100 }).withMessage('Limit must be between 1 and 100')
@@ -87,15 +88,6 @@ const validateStudentSearch = [
     .isLength({ max: 100 }).withMessage('Search too long')
     .trim()
     .escape(),
-  query('student_id')
-    .optional()
-    .matches(/^\d{7}$/).withMessage('Student ID must be 7 digits')
-    .trim(),
-  query('program')
-    .optional()
-    .matches(/^[A-Z]{2,4}\.[A-Z]{2,4}$/).withMessage('Program must be format: CS.BS, SE.MS, etc.')
-    .trim()
-    .toUpperCase(),
   query('athlete')
     .optional()
     .isBoolean().withMessage('Athlete must be true or false')
@@ -108,10 +100,16 @@ const validateStudentSearch = [
     .optional()
     .isBoolean().withMessage('First-gen must be true or false')
     .toBoolean(),
+  query('program')
+    .optional()
+    .isString().withMessage('Program must be text')
+    .isLength({ max: 50 }).withMessage('Program too long')
+    .trim(),
   query('graduating')
     .optional()
-    .isInt({ min: 2024, max: 2030 }).withMessage('Graduating year must be between 2024 and 2030')
-    .toInt(),
+    .isString().withMessage('Graduating year must be text')
+    .isLength({ min: 1, max: 10 }).withMessage('Year too long')
+    .trim(),
   query('level')
     .optional()
     .isIn(['undergraduate', 'graduate', '']).withMessage('Level must be undergraduate or graduate'),
