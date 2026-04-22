@@ -1,11 +1,13 @@
 const express = require('express')
 const cors = require('cors')
 const cookieParser = require('cookie-parser')
-const { Pool } = require('pg')
 require('dotenv').config()
 
 const app = express()
 const port = process.env.PORT || 3000
+
+// Import database pool (single source of truth)
+const pool = require('./db');
 
 // ============ CORS CONFIGURATION - MUST BE FIRST ============
 app.use((req, res, next) => {
@@ -28,28 +30,6 @@ app.use((req, res, next) => {
     res.setHeader('X-Content-Type-Options', 'nosniff')
     res.removeHeader('X-Powered-By')
     next()
-})
-
-// PostgreSQL connection
-const pool = new Pool({
-  host: process.env.DB_HOST,
-  port: process.env.DB_PORT,
-  database: process.env.DB_NAME,
-  user: process.env.DB_USER,
-  password: process.env.DB_PASSWORD,
-})
-
-// Test database connection on start
-pool.query('SELECT NOW()', (err, res) => {
-  if (err) {
-    console.error('Database connection failed:', err.message)
-  } else {
-    console.log('Connected to PostgreSQL database')
-  }
-})
-
-pool.on('error', (err) => {
-  console.error('Unexpected database error:', err)
 })
 
 // Body parsing middleware
@@ -84,7 +64,7 @@ app.get('/', (req, res) => {
 
 // ============ FILE ROUTES - Register BEFORE global auth ============
 const fileRoutes = require('./routes/files');
-app.use('/api/v1/files', fileRoutes);  // Mount file routes here
+app.use('/api/v1/files', fileRoutes);
 
 // ============ PROTECTED ROUTES (Authentication required) ============
 const { authenticate } = require('./middleware/auth');
@@ -104,7 +84,7 @@ app.get('/api/v1/departments', async (req, res) => {
     const result = await pool.query(`
       SELECT DISTINCT 
         SUBSTRING(course_name FROM '^[A-Z]+') as department
-      FROM courses
+      FROM public.courses
       WHERE course_name ~ '^[A-Z]+-'
       ORDER BY department
     `)
@@ -119,7 +99,7 @@ app.get('/api/v1/programs', async (req, res) => {
   try {
     const result = await pool.query(`
       SELECT program_code, program_name, degree_type
-      FROM programs
+      FROM public.programs
       ORDER BY program_code
     `)
     res.json(result.rows)
@@ -131,7 +111,6 @@ app.get('/api/v1/programs', async (req, res) => {
 // COURSE ROUTES 
 
 // Get all courses with filtering - WITH VALIDATION
-// In backend/index.js, around line 145, add this logging:
 app.get('/api/v1/courses', validateCourseSearch, async (req, res) => {
   try {
     const { 
@@ -140,20 +119,14 @@ app.get('/api/v1/courses', validateCourseSearch, async (req, res) => {
       page = 1, limit = 50 
     } = req.query
 
-    // Add debug logging
-    console.log('=== COURSES REQUEST ===');
-    console.log('Department filter:', department);
-    console.log('Search filter:', search);
-    console.log('Professor filter:', professor);
-
     let query = `
       SELECT 
         c.course_id, c.course_name, c.course_title, c.credits,
         c.status, c.capacity, c.available, c.term, c.location,
         STRING_AGG(DISTINCT f.name, '; ') as instructors
-      FROM courses c
-      LEFT JOIN course_faculty cf ON c.course_id = cf.course_id
-      LEFT JOIN faculty f ON cf.faculty_id = f.faculty_id
+      FROM public.courses c
+      LEFT JOIN public.course_faculty cf ON c.course_id = cf.course_id
+      LEFT JOIN public.faculty f ON cf.faculty_id = f.faculty_id
       WHERE 1=1
     `
     const params = []
@@ -163,18 +136,14 @@ app.get('/api/v1/courses', validateCourseSearch, async (req, res) => {
       query += ` AND (c.course_name ILIKE $${params.length} OR c.course_title ILIKE $${params.length})`
     }
     if (department) {
-      // Make sure department is treated as a string
-      const deptValue = String(department);
-      params.push(`%${deptValue}%`)
+      params.push(`%${department}%`)
       query += ` AND c.course_name ILIKE $${params.length}`
-      console.log('Department query with:', `%${deptValue}%`);
     }
-    // ... rest of your code
     if (professor) {
       params.push(`%${professor}%`)
       query += ` AND EXISTS (
-        SELECT 1 FROM course_faculty cf2
-        JOIN faculty f2 ON cf2.faculty_id = f2.faculty_id
+        SELECT 1 FROM public.course_faculty cf2
+        JOIN public.faculty f2 ON cf2.faculty_id = f2.faculty_id
         WHERE cf2.course_id = c.course_id AND f2.name ILIKE $${params.length}
       )`
     }
@@ -210,10 +179,10 @@ app.get('/api/v1/courses', validateCourseSearch, async (req, res) => {
     const result = await pool.query(query, params)
 
     // Get total count
-    let countQuery = `SELECT COUNT(DISTINCT c.course_id) FROM courses c`
+    let countQuery = `SELECT COUNT(DISTINCT c.course_id) FROM public.courses c`
     if (professor) {
-      countQuery += ` LEFT JOIN course_faculty cf ON c.course_id = cf.course_id
-                      LEFT JOIN faculty f ON cf.faculty_id = f.faculty_id`
+      countQuery += ` LEFT JOIN public.course_faculty cf ON c.course_id = cf.course_id
+                      LEFT JOIN public.faculty f ON cf.faculty_id = f.faculty_id`
     }
     countQuery += ` WHERE 1=1`
     
@@ -223,9 +192,9 @@ app.get('/api/v1/courses', validateCourseSearch, async (req, res) => {
       countQuery += ` AND (c.course_name ILIKE $${countParams.length} OR c.course_title ILIKE $${countParams.length})`
     }
     if (department) {
-  countParams.push(`%${department}%`)
-  countQuery += ` AND c.course_name ILIKE $${countParams.length}`
-}
+      countParams.push(`%${department}%`)
+      countQuery += ` AND c.course_name ILIKE $${countParams.length}`
+    }
     if (professor) {
       countParams.push(`%${professor}%`)
       countQuery += ` AND f.name ILIKE $${countParams.length}`
@@ -279,9 +248,9 @@ app.get('/api/v1/courses/:id', validateCourseId, async (req, res) => {
         c.*,
         STRING_AGG(DISTINCT f.name, '; ') as instructors,
         STRING_AGG(DISTINCT f.email, '; ') as instructor_emails
-      FROM courses c
-      LEFT JOIN course_faculty cf ON c.course_id = cf.course_id
-      LEFT JOIN faculty f ON cf.faculty_id = f.faculty_id
+      FROM public.courses c
+      LEFT JOIN public.course_faculty cf ON c.course_id = cf.course_id
+      LEFT JOIN public.faculty f ON cf.faculty_id = f.faculty_id
       WHERE c.course_id = $1
       GROUP BY c.course_id
     `, [id])
@@ -292,7 +261,7 @@ app.get('/api/v1/courses/:id', validateCourseId, async (req, res) => {
 
     const meetingsResult = await pool.query(`
       SELECT day_of_week, start_time, end_time, room, building, meeting_type
-      FROM course_meetings
+      FROM public.course_meetings
       WHERE course_id = $1
       ORDER BY 
         CASE day_of_week
@@ -305,7 +274,7 @@ app.get('/api/v1/courses/:id', validateCourseId, async (req, res) => {
     `, [id])
 
     const enrollmentResult = await pool.query(`
-      SELECT COUNT(*) as enrolled_count FROM enrollments WHERE course_id = $1
+      SELECT COUNT(*) as enrolled_count FROM public.enrollments WHERE course_id = $1
     `, [id])
 
     res.json({
@@ -331,12 +300,12 @@ app.get('/api/v1/courses/:id/students', validateCourseId, async (req, res) => {
         STRING_AGG(DISTINCT p.program_code, ', ') as programs,
         STRING_AGG(DISTINCT a.name, '; ') as advisors,
         STRING_AGG(DISTINCT a.email, '; ') as advisor_emails
-      FROM enrollments e
-      JOIN students s ON e.student_id = s.student_id
-      LEFT JOIN student_programs sp ON s.student_id = sp.student_id
-      LEFT JOIN programs p ON sp.program_id = p.program_id
-      LEFT JOIN student_advisors sa ON s.student_id = sa.student_id
-      LEFT JOIN advisors a ON sa.advisor_id = a.advisor_id
+      FROM public.enrollments e
+      JOIN public.students s ON e.student_id = s.student_id
+      LEFT JOIN public.student_programs sp ON s.student_id = sp.student_id
+      LEFT JOIN public.programs p ON sp.program_id = p.program_id
+      LEFT JOIN public.student_advisors sa ON s.student_id = sa.student_id
+      LEFT JOIN public.advisors a ON sa.advisor_id = a.advisor_id
       WHERE e.course_id = $1
     `
     const params = [id]
@@ -344,13 +313,13 @@ app.get('/api/v1/courses/:id/students', validateCourseId, async (req, res) => {
     if (athlete === 'true') query += ` AND s.athlete_flag = true`
     if (honors === 'true') query += ` AND s.honors_flag = true`
     if (program) {
-  params.push(`%${program}%`)
-  query += ` AND EXISTS (
-    SELECT 1 FROM student_programs sp2
-    JOIN programs p2 ON sp2.program_id = p2.program_id
-    WHERE sp2.student_id = s.student_id AND p2.program_code ILIKE $${params.length}
-  )`
-}
+      params.push(`%${program}%`)
+      query += ` AND EXISTS (
+        SELECT 1 FROM public.student_programs sp2
+        JOIN public.programs p2 ON sp2.program_id = p2.program_id
+        WHERE sp2.student_id = s.student_id AND p2.program_code ILIKE $${params.length}
+      )`
+    }
 
     query += ` GROUP BY s.student_id ORDER BY s.last_name, s.first_name`
 
@@ -377,11 +346,11 @@ app.get('/api/v1/courses/:id/schedule', validateCourseId, async (req, res) => {
         cm.start_time, 
         cm.end_time, 
         cm.room
-      FROM enrollments e1
-      JOIN students s ON e1.student_id = s.student_id
-      JOIN enrollments e2 ON s.student_id = e2.student_id
-      JOIN courses c ON e2.course_id = c.course_id
-      LEFT JOIN course_meetings cm ON c.course_id = cm.course_id
+      FROM public.enrollments e1
+      JOIN public.students s ON e1.student_id = s.student_id
+      JOIN public.enrollments e2 ON s.student_id = e2.student_id
+      JOIN public.courses c ON e2.course_id = c.course_id
+      LEFT JOIN public.course_meetings cm ON c.course_id = cm.course_id
       WHERE e1.course_id = $1
       ORDER BY 
         s.last_name, 
@@ -447,9 +416,9 @@ app.get('/api/v1/students', validateStudentSearch, async (req, res) => {
         s.athlete_flag, s.honors_flag, s.first_gen,
         s.completed_credits_ug, s.anticipated_completion_date,
         STRING_AGG(DISTINCT p.program_code, ', ') as programs
-      FROM students s
-      LEFT JOIN student_programs sp ON s.student_id = sp.student_id
-      LEFT JOIN programs p ON sp.program_id = p.program_id
+      FROM public.students s
+      LEFT JOIN public.student_programs sp ON s.student_id = sp.student_id
+      LEFT JOIN public.programs p ON sp.program_id = p.program_id
       WHERE 1=1
     `
     const params = []
@@ -466,15 +435,15 @@ app.get('/api/v1/students', validateStudentSearch, async (req, res) => {
     if (program) {
       params.push(`%${program}%`)
       query += ` AND EXISTS (
-        SELECT 1 FROM student_programs sp2
-        JOIN programs p2 ON sp2.program_id = p2.program_id
+        SELECT 1 FROM public.student_programs sp2
+        JOIN public.programs p2 ON sp2.program_id = p2.program_id
         WHERE sp2.student_id = s.student_id AND p2.program_code ILIKE $${params.length}
       )`
     }
     if (graduating) {
-  params.push(`%${graduating}%`)
-  query += ` AND s.anticipated_completion_date::text ILIKE $${params.length}`
-}
+      params.push(`${graduating}%`)
+      query += ` AND s.anticipated_completion_date::text LIKE $${params.length}`
+    }
     if (level === 'undergraduate') {
       query += ` AND (s.completed_credits_ug > 0 OR s.completed_credits_gr = 0)`
     }
@@ -491,7 +460,7 @@ app.get('/api/v1/students', validateStudentSearch, async (req, res) => {
     const result = await pool.query(query, params)
 
     // Get total count
-    const countResult = await pool.query('SELECT COUNT(*) FROM students')
+    const countResult = await pool.query('SELECT COUNT(*) FROM public.students')
 
     res.json({
       students: result.rows,
@@ -524,11 +493,11 @@ app.get('/api/v1/students/:id', validateStudentId, async (req, res) => {
           'name', a.name,
           'email', a.email
         )) FILTER (WHERE a.name IS NOT NULL) as advisors
-      FROM students s
-      LEFT JOIN student_programs sp ON s.student_id = sp.student_id
-      LEFT JOIN programs p ON sp.program_id = p.program_id
-      LEFT JOIN student_advisors sa ON s.student_id = sa.student_id
-      LEFT JOIN advisors a ON sa.advisor_id = a.advisor_id
+      FROM public.students s
+      LEFT JOIN public.student_programs sp ON s.student_id = sp.student_id
+      LEFT JOIN public.programs p ON sp.program_id = p.program_id
+      LEFT JOIN public.student_advisors sa ON s.student_id = sa.student_id
+      LEFT JOIN public.advisors a ON sa.advisor_id = a.advisor_id
       WHERE s.student_id = $1
       GROUP BY s.student_id
     `, [id])
@@ -557,7 +526,6 @@ app.get('/api/v1/students/:id/courses', validateStudentId, async (req, res) => {
         c.status,
         STRING_AGG(DISTINCT f.name, '; ') as instructors,
         e.term,
-        -- Get meeting times as a JSON array
         COALESCE(
           (SELECT json_agg(json_build_object(
             'day_of_week', cm.day_of_week,
@@ -566,21 +534,19 @@ app.get('/api/v1/students/:id/courses', validateStudentId, async (req, res) => {
             'room', cm.room,
             'building', cm.building
           ))
-          FROM course_meetings cm
+          FROM public.course_meetings cm
           WHERE cm.course_id = c.course_id
         ), '[]'::json) as meetings
-      FROM enrollments e
-      JOIN courses c ON e.course_id = c.course_id
-      LEFT JOIN course_faculty cf ON c.course_id = cf.course_id
-      LEFT JOIN faculty f ON cf.faculty_id = f.faculty_id
+      FROM public.enrollments e
+      JOIN public.courses c ON e.course_id = c.course_id
+      LEFT JOIN public.course_faculty cf ON c.course_id = cf.course_id
+      LEFT JOIN public.faculty f ON cf.faculty_id = f.faculty_id
       WHERE e.student_id = $1
       GROUP BY c.course_id, e.term
       ORDER BY c.course_name
     `, [id])
 
-    // Transform the data to include meeting info in the format your frontend expects
     const transformedResults = result.rows.map(row => {
-      // Get the first meeting (or create a placeholder)
       const meetings = row.meetings || [];
       const firstMeeting = meetings[0] || {};
       
@@ -591,7 +557,7 @@ app.get('/api/v1/students/:id/courses', validateStudentId, async (req, res) => {
         end_time: firstMeeting.end_time,
         room: firstMeeting.room,
         building: firstMeeting.building,
-        meetings: meetings  // Keep full meetings array for schedule grid
+        meetings: meetings
       };
     });
 
@@ -618,9 +584,9 @@ app.get('/api/v1/students/:id/schedule', validateStudentId, async (req, res) => 
         cm.room, 
         cm.building,
         cm.meeting_type
-      FROM enrollments e
-      JOIN courses c ON e.course_id = c.course_id
-      LEFT JOIN course_meetings cm ON c.course_id = cm.course_id
+      FROM public.enrollments e
+      JOIN public.courses c ON e.course_id = c.course_id
+      LEFT JOIN public.course_meetings cm ON c.course_id = cm.course_id
       WHERE e.student_id = $1
         AND cm.meeting_id IS NOT NULL
       ORDER BY 
@@ -645,6 +611,7 @@ app.get('/api/v1/students/:id/schedule', validateStudentId, async (req, res) => 
 
 app.listen(port, () => {
   console.log(`Server running on http://localhost:${port}`)
+  console.log(`Environment: ${process.env.NODE_ENV || 'development'}`)
 })
 
-module.exports = { app, pool }
+module.exports = { app, pool };

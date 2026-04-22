@@ -1,18 +1,13 @@
 const express = require('express');
 const bcrypt = require('bcryptjs');
-const { Pool } = require('pg');
-const { generateTokens, verifyAccessToken } = require('../utils/tokens');
+const { generateTokens, verifyRefreshToken } = require('../utils/tokens');
 const { authenticate } = require('../middleware/auth');
 const { validateLogin } = require('../middleware/validation');
 
 const router = express.Router();
-const pool = new Pool({
-  host: process.env.DB_HOST,
-  port: process.env.DB_PORT,
-  database: process.env.DB_NAME,
-  user: process.env.DB_USER,
-  password: process.env.DB_PASSWORD,
-});
+
+// Import the shared pool from index.js instead of creating a new one
+const pool = require('../db');
 
 // Session duration: 15 minutes
 const SESSION_DURATION = 15 * 60 * 1000;
@@ -34,12 +29,12 @@ router.post('/api/v1/auth/login', validateLogin, async (req, res) => {
     const { email, password } = req.body;
 
     const result = await pool.query(
-      `SELECT * FROM users WHERE email = $1 AND is_active = true`,
+      `SELECT * FROM public.users WHERE email = $1 AND is_active = true`,
       [email]
     );
 
     if (result.rows.length === 0) {
-      console.log('User not found:', email);
+      console.log('❌ User not found:', email);
       return res.status(401).json({ error: 'Invalid credentials' });
     }
 
@@ -47,18 +42,18 @@ router.post('/api/v1/auth/login', validateLogin, async (req, res) => {
     const isValidPassword = await bcrypt.compare(password, user.password_hash);
     
     if (!isValidPassword) {
-      console.log('Invalid password for user:', email);
+      console.log('❌ Invalid password for user:', email);
       return res.status(401).json({ error: 'Invalid credentials' });
     }
 
     await pool.query(
-      'UPDATE users SET last_login = CURRENT_TIMESTAMP WHERE user_id = $1',
+      'UPDATE public.users SET last_login = CURRENT_TIMESTAMP WHERE user_id = $1',
       [user.user_id]
     );
 
     const { accessToken, refreshToken } = generateTokens(user);
 
-    console.log('Login successful for user:', email);
+    console.log('✅ Login successful for user:', email);
     console.log('Setting session cookie with maxAge:', SESSION_DURATION, 'ms');
 
     res.cookie('sessionToken', accessToken, {
@@ -77,7 +72,7 @@ router.post('/api/v1/auth/login', validateLogin, async (req, res) => {
       user: userWithoutPassword 
     });
   } catch (error) {
-    console.error('Login error:', error);
+    console.error('❌ Login error:', error);
     res.status(500).json({ error: 'Login failed' });
   }
 });
@@ -100,7 +95,7 @@ router.post('/api/v1/auth/logout', (req, res) => {
 router.get('/api/v1/auth/me', authenticate, async (req, res) => {
   try {
     const result = await pool.query(
-      'SELECT user_id, first_name, last_name, email, department, role, created_at FROM users WHERE user_id = $1',
+      'SELECT user_id, first_name, last_name, email, department, role, created_at FROM public.users WHERE user_id = $1',
       [req.user.userId]
     );
     
@@ -119,7 +114,7 @@ router.get('/api/v1/auth/me', authenticate, async (req, res) => {
 router.get('/api/v1/auth/check', authenticate, async (req, res) => {
   try {
     const result = await pool.query(
-      'SELECT user_id, first_name, last_name, email, department, role FROM users WHERE user_id = $1',
+      'SELECT user_id, first_name, last_name, email, department, role FROM public.users WHERE user_id = $1',
       [req.user.userId]
     );
     

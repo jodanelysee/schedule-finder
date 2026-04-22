@@ -6,9 +6,12 @@
   "author": "",
   "type": "commonjs",
   "main": "index.js",
-  "scripts": {
+   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
-    "start": "DOTENV_CONFIG_SILENT=true node index.js"
+    "start": "node index.js",
+    "dev": "DOTENV_CONFIG_SILENT=true NODE_ENV=development node index.js",
+    "dev:supabase": "dotenv -e .env.production node index.js",
+    "build": "echo \"No build step required\""
   },
   "dependencies": {
     "bcryptjs": "^3.0.3",
@@ -22,6 +25,7 @@
   },
   "devDependencies": {
     "@types/bcryptjs": "^2.4.6",
-    "@types/jsonwebtoken": "^9.0.10"
+    "@types/jsonwebtoken": "^9.0.10",
+    "dotenv-cli": "^11.0.0"
   }
 }
