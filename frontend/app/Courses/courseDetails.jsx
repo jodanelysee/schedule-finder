@@ -293,7 +293,7 @@ const toMinutes = (timeStr) => {
   return h * 60 + m;
 };
 
-const DAY_START  = 8 * 60 + 0;
+const DAY_START  = 8 * 60;
 const DAY_END    = 21 * 60 + 30;
 const TOTAL_MINS = DAY_END - DAY_START;
 const PX_PER_MIN = 1.4;
@@ -306,81 +306,116 @@ const HOUR_LABELS = Array.from({ length: Math.ceil(TOTAL_MINS / 60) + 1 }, (_, i
   return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
 }).filter(Boolean);
 
-/** Palette of distinct colors for different students */
-const STUDENT_COLORS = [
-  { bg: 'bg-blue-100',   border: 'border-blue-500',   title: 'text-blue-900',   sub: 'text-blue-700' },
-  { bg: 'bg-purple-100', border: 'border-purple-500', title: 'text-purple-900', sub: 'text-purple-700' },
-  { bg: 'bg-orange-100', border: 'border-orange-500', title: 'text-orange-900', sub: 'text-orange-700' },
-  { bg: 'bg-pink-100',   border: 'border-pink-500',   title: 'text-pink-900',   sub: 'text-pink-700' },
-  { bg: 'bg-teal-100',   border: 'border-teal-500',   title: 'text-teal-900',   sub: 'text-teal-700' },
-  { bg: 'bg-yellow-100', border: 'border-yellow-500', title: 'text-yellow-900', sub: 'text-yellow-700' },
-];
+/**
+ * Assign each block a sub-column index so that no two overlapping blocks
+ * share the same sub-column. Returns blocks with colIndex and totalCols added.
+ */
+const assignColumns = (blocks) => {
+  if (blocks.length === 0) return [];
+
+  // Sort by start time
+  const sorted = [...blocks].map((b, i) => ({ ...b, _orig: i }))
+    .sort((a, b) => a.startMin - b.startMin);
+
+  // colEnds[i] = the endMin of the last block placed in sub-column i
+  const colEnds = [];
+
+  const placed = sorted.map(block => {
+    let col = colEnds.findIndex(end => end <= block.startMin);
+    if (col === -1) {
+      col = colEnds.length;
+      colEnds.push(0);
+    }
+    colEnds[col] = block.endMin;
+    return { ...block, colIndex: col };
+  });
+
+  const totalCols = colEnds.length;
+  return placed.map(b => ({ ...b, totalCols }));
+};
 
 // ─── CourseScheduleGrid ──────────────────────────────────────────────────────
 /**
- * Shows each student as a named column within each day.
- * When multiple students share the same time slot the columns sit side-by-side
- * and the whole grid scrolls horizontally.
+ * One column per day. Within each day:
+ *   - Blocks for the same course at the exact same time are merged into one,
+ *     listing all student names inside.
+ *   - Blocks at overlapping (but different) times are split into side-by-side
+ *     sub-columns so nothing is hidden.
+ * The outer container scrolls horizontally if the total width exceeds the viewport.
  *
- * studentsData shape:  Array<{ first_name, student_id, courses: [{ day_of_week, course_name, course_title, start_time, end_time, room }] }>
+ * studentsData shape:
+ *   Array<{
+ *     first_name, last_name, student_id,
+ *     courses: [{ day_of_week, course_name, course_title, start_time, end_time, room }]
+ *   }>
  */
 const CourseScheduleGrid = ({ studentsData }) => {
   const days = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'];
 
-  // Build student list + assign colors
-  const studentList = studentsData.map((s, i) => ({
-    id:    s.student_id,
-    name:  s.first_name || s.student_id,
-    color: STUDENT_COLORS[i % STUDENT_COLORS.length],
-  }));
-
-  // Index events:  byDay[day][studentId] = [{ ...event }]
+  // ── Step 1: collect & merge identical course+time slots per day ──────────
   const byDay = {};
   days.forEach(d => { byDay[d] = {}; });
 
   studentsData.forEach(student => {
-    const sid = student.student_id;
+    const displayName = student.first_name
+      ? (student.last_name ? `${student.first_name} ${student.last_name}` : student.first_name)
+      : String(student.student_id);
+
     if (!student.courses) return;
     student.courses.forEach(course => {
       const day = course.day_of_week;
       if (!byDay[day]) return;
-      if (!byDay[day][sid]) byDay[day][sid] = [];
+
       const startMin = toMinutes(course.start_time);
-      const endMin   = toMinutes(course.end_time);
       if (startMin === null) return;
-      byDay[day][sid].push({
-        course_name:  course.course_name,
-        course_title: course.course_title,
-        room:         course.room,
-        startMin,
-        endMin: endMin ?? startMin + 75,
-      });
+      const endMin = toMinutes(course.end_time) ?? (startMin + 75);
+
+      // Same course + same exact window → merge into one block
+      const key = `${course.course_name}__${startMin}__${endMin}`;
+
+      if (!byDay[day][key]) {
+        byDay[day][key] = {
+          course_name:  course.course_name,
+          course_title: course.course_title,
+          room:         course.room,
+          startMin,
+          endMin,
+          studentNames: [],
+        };
+      }
+      if (!byDay[day][key].studentNames.includes(displayName)) {
+        byDay[day][key].studentNames.push(displayName);
+      }
     });
   });
 
-  const gridHeight  = TOTAL_MINS * PX_PER_MIN;
-  // Each student sub-column width (px) — narrower so many fit without scrolling too far
-  const COL_WIDTH   = 110;
+  // ── Step 2: assign sub-columns per day to handle overlapping blocks ──────
+  const layoutByDay = {};
+  days.forEach(day => {
+    layoutByDay[day] = assignColumns(Object.values(byDay[day]));
+  });
+
+  // ── Step 3: compute day-column width from the maximum sub-column count ───
+  const MIN_SUBCOL_WIDTH = 130; // px — minimum readable width per sub-column
+  const maxSubCols = Math.max(
+    1,
+    ...days.map(d =>
+      layoutByDay[d].length > 0
+        ? Math.max(...layoutByDay[d].map(b => b.totalCols))
+        : 1
+    )
+  );
+  const DAY_COL_WIDTH = maxSubCols * MIN_SUBCOL_WIDTH;
+
+  const gridHeight = TOTAL_MINS * PX_PER_MIN;
 
   return (
     <div className="overflow-x-auto">
-      {/* Legend */}
-      {studentList.length > 0 && (
-        <div className="flex flex-wrap gap-2 mb-3">
-          {studentList.map(s => (
-            <div key={s.id} className={`flex items-center gap-1 px-2 py-1 rounded text-xs font-medium ${s.color.bg} ${s.color.title}`}>
-              <div className={`w-2 h-2 rounded-full border-2 ${s.color.border}`} />
-              {s.name}
-            </div>
-          ))}
-        </div>
-      )}
+      <div className="flex" style={{ minWidth: 64 + days.length * DAY_COL_WIDTH }}>
 
-      <div className="flex" style={{ minWidth: 80 + days.length * studentList.length * COL_WIDTH }}>
-
-        {/* Time axis */}
-        <div className="flex-shrink-0 w-16 relative" style={{ height: gridHeight + 48 }}>
-          <div className="h-12" />
+        {/* ── Time axis ── */}
+        <div className="flex-shrink-0 w-16 relative" style={{ height: gridHeight + 32 }}>
+          <div className="h-8" />
           <div className="relative" style={{ height: gridHeight }}>
             {HOUR_LABELS.map(label => {
               const top = (toMinutes(label) - DAY_START) * PX_PER_MIN;
@@ -397,67 +432,99 @@ const CourseScheduleGrid = ({ studentsData }) => {
           </div>
         </div>
 
-        {/* Day groups */}
-        {days.map(day => (
-          <div key={day} className="border-l border-gray-200" style={{ width: studentList.length * COL_WIDTH }}>
-            {/* Day header */}
-            <div className="h-8 flex items-center justify-center text-sm font-semibold text-gray-700 border-b border-gray-200 bg-gray-50">
-              {day}
-            </div>
+        {/* ── Day columns ── */}
+        {days.map(day => {
+          const blocks = layoutByDay[day];
 
-            {/* Student columns */}
-            <div className="flex relative" style={{ height: gridHeight }}>
-              {/* Hour grid lines — drawn once behind all columns */}
-              <div className="absolute inset-0 pointer-events-none">
+          return (
+            <div key={day} className="border-l border-gray-200" style={{ width: DAY_COL_WIDTH }}>
+              {/* Day header */}
+              <div className="h-8 flex items-center justify-center text-sm font-semibold text-gray-700 border-b border-gray-200 bg-gray-50">
+                {day}
+              </div>
+
+              {/* Events area */}
+              <div className="relative" style={{ height: gridHeight }}>
+
+                {/* Hour grid lines */}
                 {HOUR_LABELS.map(label => {
                   const top = (toMinutes(label) - DAY_START) * PX_PER_MIN;
                   return (
                     <div
                       key={label}
-                      className="absolute left-0 right-0 border-t border-gray-100"
+                      className="absolute left-0 right-0 border-t border-gray-100 pointer-events-none"
                       style={{ top }}
                     />
                   );
                 })}
-              </div>
 
-              {studentList.map(s => (
-                <div
-                  key={s.id}
-                  className="relative border-r border-gray-100"
-                  style={{ width: COL_WIDTH, height: gridHeight, flexShrink: 0 }}
-                >
-                  {(byDay[day][s.id] || []).map((course, idx) => {
-                    const top    = (course.startMin - DAY_START) * PX_PER_MIN;
-                    const height = (course.endMin - course.startMin) * PX_PER_MIN;
-                    return (
-                      <div
-                        key={idx}
-                        className={`absolute left-1 right-1 border-l-4 rounded shadow-sm overflow-hidden px-1.5 py-1 ${s.color.bg} ${s.color.border}`}
-                        style={{ top, height, minHeight: 22 }}
-                        title={`${s.name}: ${course.course_name} — ${course.course_title}${course.room ? ` (${course.room})` : ''}`}
-                      >
-                        <div className={`text-xs font-semibold truncate leading-tight ${s.color.title}`}>
-                          {course.course_name}
-                        </div>
-                        {height > 30 && (
-                          <div className={`text-xs truncate leading-tight ${s.color.sub}`}>
-                            {course.course_title}
-                          </div>
-                        )}
-                        {height > 46 && course.room && (
-                          <div className={`text-xs truncate leading-tight ${s.color.sub}`}>
-                            {course.room}
-                          </div>
-                        )}
+                {/* Blocks */}
+                {blocks.map((block, idx) => {
+                  const top      = (block.startMin - DAY_START) * PX_PER_MIN;
+                  const height   = (block.endMin - block.startMin) * PX_PER_MIN;
+                  const isShared = block.studentNames.length > 1;
+
+                  // Each block gets an equal slice of the day column
+                  const subColW  = DAY_COL_WIDTH / block.totalCols;
+                  const leftPx   = block.colIndex * subColW;
+
+                  return (
+                    <div
+                      key={idx}
+                      className={`absolute border-l-4 rounded shadow-sm px-1.5 py-1 flex flex-col ${
+                        isShared
+                          ? 'bg-indigo-50 border-indigo-500'
+                          : 'bg-blue-50 border-blue-400'
+                      }`}
+                      style={{
+                        top,
+                        height,
+                        minHeight: 22,
+                        left:  leftPx + 2,
+                        width: subColW - 4,
+                        overflow: 'hidden',
+                      }}
+                      title={`${block.course_name} — ${block.course_title}${block.room ? ` (${block.room})` : ''}\nStudents: ${block.studentNames.join(', ')}`}
+                    >
+                      {/* Course name — fixed, never scrolls */}
+                      <div className={`text-xs font-semibold truncate leading-tight flex-shrink-0 ${isShared ? 'text-indigo-900' : 'text-blue-900'}`}>
+                        {block.course_name}
                       </div>
-                    );
-                  })}
-                </div>
-              ))}
+
+                      {/* Time range — fixed */}
+                      <div className={`text-xs leading-tight flex-shrink-0 ${isShared ? 'text-indigo-600' : 'text-blue-600'}`}>
+                        {`${String(Math.floor(block.startMin / 60)).padStart(2, '0')}:${String(block.startMin % 60).padStart(2, '0')} – ${String(Math.floor(block.endMin / 60)).padStart(2, '0')}:${String(block.endMin % 60).padStart(2, '0')}`}
+                      </div>
+
+                      {/* Course title — fixed */}
+                      {height > 28 && (
+                        <div className={`text-xs truncate leading-tight flex-shrink-0 ${isShared ? 'text-indigo-700' : 'text-blue-700'}`}>
+                          {block.course_title}
+                        </div>
+                      )}
+
+                      {/* Room — fixed */}
+                      {height > 44 && block.room && (
+                        <div className={`text-xs truncate leading-tight flex-shrink-0 ${isShared ? 'text-indigo-600' : 'text-blue-600'}`}>
+                          {block.room}
+                        </div>
+                      )}
+
+                      {/* Student names — takes remaining space and scrolls within it */}
+                      {height > 20 && (
+                        <div
+                          className={`text-xs leading-tight mt-0.5 font-medium min-h-0 overflow-y-auto ${isShared ? 'text-indigo-800' : 'text-blue-800'}`}
+                        >
+                          {block.studentNames.join(', ')}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
             </div>
-          </div>
-        ))}
+          );
+        })}
       </div>
     </div>
   );
