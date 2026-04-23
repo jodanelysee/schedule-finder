@@ -9,9 +9,7 @@
    "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
     "start": "node index.js",
-    "dev": "DOTENV_CONFIG_SILENT=true NODE_ENV=development node index.js",
-    "dev:supabase": "dotenv -e .env.production node index.js",
-    "build": "echo \"No build step required\""
+    "dev": "DOTENV_CONFIG_SILENT=true node index.js"
   },
   "dependencies": {
     "bcryptjs": "^3.0.3",

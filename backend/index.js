@@ -10,8 +10,17 @@ const port = process.env.PORT || 3000
 const pool = require('./db');
 
 // ============ CORS CONFIGURATION - MUST BE FIRST ============
+// Update allowed origins to include Azure frontend
+const allowedOrigins = [
+  'http://localhost:5173',
+  'https://schedule-finder-frontend.azurewebsites.net'
+];
+
 app.use((req, res, next) => {
-  res.header('Access-Control-Allow-Origin', 'http://localhost:5173');
+  const origin = req.headers.origin;
+  if (allowedOrigins.includes(origin)) {
+    res.header('Access-Control-Allow-Origin', origin);
+  }
   res.header('Access-Control-Allow-Credentials', 'true');
   res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS, PATCH');
   res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, Cookie, X-Requested-With, Accept');
